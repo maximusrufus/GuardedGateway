@@ -1,0 +1,42 @@
+# Prices as of 2026-09. Real cloud prices drift; treat this file as a
+# starting point and update it for your own account, not as a live feed.
+# All prices are USD per 1000 tokens.
+models:
+  "fake/echo":
+    prompt_per_1k: 0.0
+    completion_per_1k: 0.0
+    baa: true
+  "ollama/qwen2.5:7b":
+    prompt_per_1k: 0.0
+    completion_per_1k: 0.0
+    baa: true
+  "ollama/qwen2.5:14b":
+    prompt_per_1k: 0.0
+    completion_per_1k: 0.0
+    baa: true
+  "openai/gpt-4o":
+    prompt_per_1k: 0.005
+    completion_per_1k: 0.015
+    baa: false
+  "openai/gpt-4o-mini":
+    prompt_per_1k: 0.00015
+    completion_per_1k: 0.0006
+    baa: false
+  "anthropic/claude-sonnet":
+    prompt_per_1k: 0.003
+    completion_per_1k: 0.015
+    baa: true
+  "gemini/gemini-2.5-pro":
+    prompt_per_1k: 0.00125
+    completion_per_1k: 0.01
+    baa: true
+  "gemini/gemini-2.5-flash":
+    prompt_per_1k: 0.000075
+    completion_per_1k: 0.0003
+    baa: true
+
+# Default price for any model not listed above — conservative (non-zero) so
+# an unknown model never estimates as free.
+default:
+  prompt_per_1k: 0.01
+  completion_per_1k: 0.03

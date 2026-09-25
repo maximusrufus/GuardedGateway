@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>GuardedGateway — cannot overspend, cannot leak PHI</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: -apple-system, Segoe UI, sans-serif; max-width: 860px; margin: 40px auto; padding: 0 20px; color: #1a1a1a; }
+    h1 { font-size: 2rem; }
+    .tiers { display: flex; gap: 16px; flex-wrap: wrap; margin: 24px 0; }
+    .tier { border: 1px solid #ddd; border-radius: 8px; padding: 16px; flex: 1; min-width: 180px; }
+    .tier h3 { margin-top: 0; }
+    .price { font-size: 1.5rem; font-weight: bold; }
+    .diff { background: #f6f6f6; padding: 16px; border-radius: 8px; margin-top: 24px; }
+    code { background: #eee; padding: 2px 5px; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <h1>GuardedGateway</h1>
+  <p><strong>Cannot overspend. Cannot leak PHI.</strong> An OpenAI-compatible LLM gateway with hard dollar caps enforced before any upstream call, a durable spend ledger, PHI redaction, and BAA-only routing for PHI-flagged traffic.</p>
+
+  <div class="tiers">
+    <div class="tier">
+      <h3>Free</h3>
+      <div class="price">$0</div>
+      <p>Self-host. Full source, Apache-2.0.</p>
+    </div>
+    <div class="tier">
+      <h3>Team</h3>
+      <div class="price">$199/mo</div>
+      <p>Hosted, multi-key spend caps.</p>
+    </div>
+    <div class="tier">
+      <h3>Clinic</h3>
+      <div class="price">$499/mo</div>
+      <p>+ BAA routing, audit export.</p>
+    </div>
+    <div class="tier">
+      <h3>Health System</h3>
+      <div class="price">$999/mo</div>
+      <p>+ priority support, SSO.</p>
+    </div>
+  </div>
+
+  <div class="diff">
+    <strong>Honest differentiation:</strong> Cloudflare AI Gateway has free spend limits; LiteLLM has budgets.
+    Our difference: PHI redaction + BAA routing + refusal-before-call (not after) + a durable ledger, self-hostable.
+  </div>
+
+  <p>API: <code>POST /v1/chat/completions</code> (OpenAI wire-compatible). See <a href="/dashboard">dashboard</a>.</p>
+</body>
+</html>

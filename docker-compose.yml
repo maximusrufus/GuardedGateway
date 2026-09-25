@@ -1,0 +1,15 @@
+version: "3.9"
+
+services:
+  guardedgateway:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - gg-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  gg-data:

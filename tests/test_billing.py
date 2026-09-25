@@ -1,0 +1,73 @@
+import json
+import time
+
+from guardedgateway import billing
+
+
+def test_checkout_not_configured_by_default(monkeypatch):
+    monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
+    monkeypatch.delenv("PAYMENT_LINK_URL", raising=False)
+    result = billing.create_checkout_session("team")
+    assert result.status == "not_configured"
+
+
+def test_checkout_falls_back_to_payment_link(monkeypatch):
+    monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
+    monkeypatch.setenv("PAYMENT_LINK_URL", "https://buy.stripe.com/test123")
+    result = billing.create_checkout_session("clinic")
+    assert result.status == "payment_link"
+    assert result.url == "https://buy.stripe.com/test123"
+
+
+def test_checkout_uses_mocked_stripe_when_configured(monkeypatch):
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_fake")
+    monkeypatch.setenv("STRIPE_PRICE_TEAM", "price_fake_team")
+
+    def fake_create(**kwargs):
+        assert kwargs["line_items"][0]["price"] == "price_fake_team"
+        return {"url": "https://checkout.stripe.com/fake-session"}
+
+    result = billing.create_checkout_session("team", stripe_checkout_create=fake_create)
+    assert result.status == "stripe_session"
+    assert result.url == "https://checkout.stripe.com/fake-session"
+
+
+def test_checkout_unknown_tier():
+    result = billing.create_checkout_session("nonexistent")
+    assert result.status == "not_configured"
+
+
+def test_webhook_signature_verification_valid():
+    secret = "whsec_test"
+    payload = json.dumps({"type": "checkout.session.completed"}).encode()
+    ts = str(int(time.time()))
+    import hashlib
+    import hmac
+
+    signed = f"{ts}.".encode() + payload
+    sig = hmac.new(secret.encode(), signed, hashlib.sha256).hexdigest()
+    header = f"t={ts},v1={sig}"
+    event = billing.verify_webhook_signature(payload, header, secret)
+    assert event is not None
+    assert event["type"] == "checkout.session.completed"
+
+
+def test_webhook_signature_rejects_bad_signature():
+    payload = b'{"type": "x"}'
+    header = "t=123,v1=deadbeef"
+    event = billing.verify_webhook_signature(payload, header, "whsec_test")
+    assert event is None
+
+
+def test_webhook_signature_rejects_stale_timestamp():
+    secret = "whsec_test"
+    payload = b'{"type": "x"}'
+    import hashlib
+    import hmac
+
+    stale_ts = str(int(time.time()) - 10000)
+    signed = f"{stale_ts}.".encode() + payload
+    sig = hmac.new(secret.encode(), signed, hashlib.sha256).hexdigest()
+    header = f"t={stale_ts},v1={sig}"
+    event = billing.verify_webhook_signature(payload, header, secret)
+    assert event is None

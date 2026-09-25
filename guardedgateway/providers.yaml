@@ -1,0 +1,30 @@
+# Provider registry: which providers exist, whether each is BAA-covered
+# (safe for PHI-flagged traffic), and its fallback chain for the circuit
+# breaker. `baa: true` here is a declaration the operator makes after signing
+# a real Business Associate Agreement with that vendor for their own tenant —
+# GuardedGateway does not verify BAAs, it only refuses to route PHI-flagged
+# traffic to a provider not marked baa: true here.
+providers:
+  fake:
+    baa: true
+    fallbacks: []
+  ollama:
+    baa: true
+    fallbacks: ["fake"]
+  openai:
+    baa: false
+    # Deliberately no fallback here: openai is not BAA-covered, and a
+    # PHI-flagged request that lands on it must be refused (422
+    # no_baa_provider), never silently rerouted to a free local model —
+    # that would defeat the "BAA-only routing" guarantee.
+    fallbacks: []
+  anthropic:
+    baa: true
+    fallbacks: ["ollama", "fake"]
+  gemini:
+    baa: true
+    fallbacks: ["ollama", "fake"]
+
+circuit_breaker:
+  failure_threshold: 5
+  backoff_seconds: 30

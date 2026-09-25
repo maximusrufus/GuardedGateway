@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>GuardedGateway — Dashboard</title>
+  <style>
+    body { font-family: -apple-system, Segoe UI, sans-serif; max-width: 860px; margin: 40px auto; padding: 0 20px; }
+    table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+    th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+    .open { color: #b00020; font-weight: bold; }
+    .closed { color: #0a7d2c; }
+  </style>
+</head>
+<body>
+  <h1>Dashboard — {{ period }}</h1>
+  <p>Global monthly cap: {{ global_cap if global_cap is not none else "not set" }}</p>
+
+  <h2>Spend by key</h2>
+  <table>
+    <tr><th>API key</th><th>Spend (USD)</th></tr>
+    {% for key, spend in spend_by_key.items() %}
+    <tr><td>{{ key }}</td><td>{{ "%.4f"|format(spend) }}</td></tr>
+    {% endfor %}
+  </table>
+
+  <h2>Spend by model</h2>
+  <table>
+    <tr><th>Model</th><th>Spend (USD)</th></tr>
+    {% for model, spend in spend_by_model.items() %}
+    <tr><td>{{ model }}</td><td>{{ "%.4f"|format(spend) }}</td></tr>
+    {% endfor %}
+  </table>
+
+  <h2>Circuit breaker state</h2>
+  <table>
+    <tr><th>Provider</th><th>State</th><th>Failures</th></tr>
+    {% for provider, st in breaker_state.items() %}
+    <tr>
+      <td>{{ provider }}</td>
+      <td class="{{ 'open' if st.open else 'closed' }}">{{ "OPEN" if st.open else "closed" }}</td>
+      <td>{{ st.failures }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</body>
+</html>
