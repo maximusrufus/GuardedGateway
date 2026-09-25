@@ -68,7 +68,7 @@ the file for your own account rather than trusting it as a live feed.
 
 `cap == 0` is a deliberate, explicit **deny-all** for any nonzero-cost call — not a
 no-op. See `guardedgateway/spend_guard.py` and `PROVENANCE.md` for why this differs
-from the ReviewHouse code it was ported from.
+from the an internal module code it was ported from.
 
 ## Admin CLI
 
