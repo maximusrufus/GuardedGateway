@@ -164,18 +164,28 @@ class Ledger:
             (total,) = cur.fetchone()
         return float(total)
 
-    def audit_rows(self, ts_from: float, ts_to: float) -> list[dict]:
+    def audit_rows(self, ts_from: float, ts_to: float, tenant: str | None = None) -> list[dict]:
         """Rows for the audit endpoint — never includes prompt/response text
-        because that text is never written to this table in the first place."""
+        because that text is never written to this table in the first place.
+
+        `tenant` scopes the result to a single tenant's rows. Every caller
+        that renders or returns these rows to a client MUST pass the
+        calling tenant here -- omitting it leaks every other tenant's spend,
+        keys, and provider/model usage."""
+        clauses = ["ts >= ?", "ts <= ?"]
+        params: list[object] = [ts_from, ts_to]
+        if tenant is not None:
+            clauses.append("tenant = ?")
+            params.append(tenant)
+        sql = (
+            "SELECT ts, period, tenant, api_key, provider, model, "
+            "prompt_tokens, completion_tokens, cost_usd, "
+            "phi_flagged, redaction_count, cache_hit, refused, "
+            "refusal_reason, request_hash "
+            f"FROM ledger WHERE {' AND '.join(clauses)} ORDER BY ts ASC"
+        )
         with self._cursor() as cur:
-            cur.execute(
-                """SELECT ts, period, tenant, api_key, provider, model,
-                          prompt_tokens, completion_tokens, cost_usd,
-                          phi_flagged, redaction_count, cache_hit, refused,
-                          refusal_reason, request_hash
-                   FROM ledger WHERE ts >= ? AND ts <= ? ORDER BY ts ASC""",
-                (ts_from, ts_to),
-            )
+            cur.execute(sql, params)
             cols = [d[0] for d in cur.description]
             return [dict(zip(cols, row, strict=True)) for row in cur.fetchall()]
 

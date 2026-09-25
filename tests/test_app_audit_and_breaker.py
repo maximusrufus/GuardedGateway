@@ -52,7 +52,7 @@ def test_circuit_breaker_opens_after_repeated_upstream_failures(client, tenant_s
         )
         assert resp.status_code == 200  # falls back to 'fake' each time
 
-    dash = client.get("/dashboard")
+    dash = client.get("/dashboard", headers={"Authorization": f"Bearer {api_key}"})
     assert dash.status_code == 200
     assert "OPEN" in dash.text
 

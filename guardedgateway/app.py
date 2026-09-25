@@ -46,6 +46,31 @@ logger = logging.getLogger("guardedgateway")
 
 app = FastAPI(title="GuardedGateway", version="0.1.0")
 
+# Routes that intentionally serve without an API key. Every route NOT listed
+# here must reject an unauthenticated request (401/403/404/redirect) --
+# enforced by tests/test_public_routes_allowlist.py, which walks every
+# route FastAPI has registered and fails closed on anything missing here.
+PUBLIC_ROUTES = {
+    ("GET", "/healthz"): "liveness probe, no data",
+    ("GET", "/"): "marketing landing page",
+    ("POST", "/billing/webhook"): "Stripe webhook, verified by HMAC signature not API key",
+    ("POST", "/billing/checkout/{tier}"): (
+        "starts a Stripe Checkout session for a caller-supplied tenant name; "
+        "returns a checkout URL only, reads no spend/key/tenant data"
+    ),
+    ("POST", "/billing/portal"): (
+        "looks up a tenant by caller-supplied name only to build a Stripe "
+        "portal redirect; no spend/key data rendered"
+    ),
+    ("GET", "/openapi.json"): "FastAPI auto-generated API schema, no tenant data",
+    ("GET", "/docs"): "FastAPI auto-generated Swagger UI, no tenant data",
+    (
+        "GET",
+        "/docs/oauth2-redirect",
+    ): "FastAPI auto-generated Swagger UI helper page, no tenant data",
+    ("GET", "/redoc"): "FastAPI auto-generated ReDoc UI, no tenant data",
+}
+
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
@@ -474,11 +499,12 @@ async def audit(
 ):
     """JSONL of ledger rows — hashes/costs/providers/redaction counts.
     NEVER raw prompt/response content, because that content is never
-    written to the ledger table in the first place."""
-    _resolve_api_key_record(authorization)
+    written to the ledger table in the first place. Scoped to the calling
+    tenant only -- never another tenant's rows."""
+    key_record = _resolve_api_key_record(authorization)
     ts_from = from_ if from_ is not None else 0.0
     ts_to = to if to is not None else time.time()
-    rows = get_ledger().audit_rows(ts_from, ts_to)
+    rows = get_ledger().audit_rows(ts_from, ts_to, tenant=key_record.tenant)
     lines = "\n".join(json.dumps(r) for r in rows)
     return PlainTextResponse(lines, media_type="application/x-ndjson")
 
@@ -489,9 +515,13 @@ async def landing(request: Request):
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard(request: Request):
+async def dashboard(request: Request, authorization: str | None = Header(default=None)):
+    """Tenant spend/keys/cap dashboard. Requires the same Bearer API-key
+    auth as the JSON API and shows ONLY the calling tenant's rows -- never
+    another tenant's spend, keys, or breaker state."""
+    key_record = _resolve_api_key_record(authorization)
     period = current_period()
-    rows = get_ledger().audit_rows(0.0, time.time())
+    rows = get_ledger().audit_rows(0.0, time.time(), tenant=key_record.tenant)
     period_rows = [r for r in rows if r["period"] == period]
     spend_by_key: dict[str, float] = {}
     spend_by_model: dict[str, float] = {}
@@ -514,7 +544,7 @@ async def dashboard(request: Request):
             "period": period,
             "spend_by_key": spend_by_key,
             "spend_by_model": spend_by_model,
-            "global_cap": _global_cap(),
+            "global_cap": _effective_cap(key_record.cap_usd, tenant=key_record.tenant),
             "breaker_state": breaker_state,
         },
     )

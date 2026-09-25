@@ -81,7 +81,7 @@ def test_dashboard_renders(client, tenant_store):
         headers={"Authorization": f"Bearer {api_key}"},
         json={"model": "fake/echo", "messages": [{"role": "user", "content": "hi"}]},
     )
-    resp = client.get("/dashboard")
+    resp = client.get("/dashboard", headers={"Authorization": f"Bearer {api_key}"})
     assert resp.status_code == 200
     assert "Dashboard" in resp.text
 
