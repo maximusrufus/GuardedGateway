@@ -19,7 +19,10 @@ from guardedgateway import crypto, ledger
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tenants (
     name TEXT PRIMARY KEY,
-    created_ts REAL NOT NULL
+    created_ts REAL NOT NULL,
+    stripe_customer_id TEXT,
+    stripe_subscription_id TEXT,
+    subscription_status TEXT
 );
 CREATE TABLE IF NOT EXISTS api_keys (
     api_key TEXT PRIMARY KEY,
@@ -35,7 +38,18 @@ CREATE TABLE IF NOT EXISTS provider_keys (
     encrypted_key TEXT NOT NULL,
     PRIMARY KEY (tenant, provider)
 );
+CREATE TABLE IF NOT EXISTS stripe_events (
+    event_id TEXT PRIMARY KEY,
+    event_type TEXT NOT NULL,
+    processed_ts REAL NOT NULL
+);
 """
+
+_TENANT_MIGRATION_COLUMNS = (
+    "stripe_customer_id TEXT",
+    "stripe_subscription_id TEXT",
+    "subscription_status TEXT",
+)
 
 
 @dataclass
@@ -55,6 +69,11 @@ class TenantStore:
         self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
         with self._lock:
             self._conn.executescript(_SCHEMA)
+            for column in _TENANT_MIGRATION_COLUMNS:
+                try:
+                    self._conn.execute(f"ALTER TABLE tenants ADD COLUMN {column}")
+                except sqlite3.OperationalError:
+                    pass  # column already exists
             self._conn.commit()
 
     def create_tenant(self, name: str) -> None:
@@ -135,6 +154,85 @@ class TenantStore:
         if row is None:
             return None
         return crypto.decrypt(row[0])
+
+    def set_stripe_customer(self, tenant: str, customer_id: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE tenants SET stripe_customer_id = ? WHERE name = ?",
+                (customer_id, tenant),
+            )
+            self._conn.commit()
+
+    def set_subscription_state(
+        self, tenant: str, subscription_id: str | None, status: str | None
+    ) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE tenants SET stripe_subscription_id = ?, subscription_status = ? "
+                "WHERE name = ?",
+                (subscription_id, status, tenant),
+            )
+            self._conn.commit()
+
+    def get_tenant(self, name: str) -> dict | None:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT name, stripe_customer_id, stripe_subscription_id, "
+                "subscription_status FROM tenants WHERE name = ?",
+                (name,),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        return {
+            "name": row[0],
+            "stripe_customer_id": row[1],
+            "stripe_subscription_id": row[2],
+            "subscription_status": row[3],
+        }
+
+    def resolve_tenant_by_customer_id(self, customer_id: str) -> dict | None:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT name, stripe_customer_id, stripe_subscription_id, "
+                "subscription_status FROM tenants WHERE stripe_customer_id = ?",
+                (customer_id,),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        return {
+            "name": row[0],
+            "stripe_customer_id": row[1],
+            "stripe_subscription_id": row[2],
+            "subscription_status": row[3],
+        }
+
+    def revoke_tenant_keys(self, tenant: str) -> None:
+        """Downgrade/revoke: zero every key's cap for this tenant so further
+        spend is blocked (used on subscription cancellation or payment
+        failure). Keys are not deleted -- reinstating simply raises the cap
+        again once payment resumes."""
+        with self._lock:
+            self._conn.execute("UPDATE api_keys SET cap_usd = 0 WHERE tenant = ?", (tenant,))
+            self._conn.commit()
+
+    def mark_event_processed(self, event_id: str, event_type: str) -> bool:
+        """Idempotency guard for Stripe webhook events. Returns True the
+        first time an event id is seen, False on any repeat delivery."""
+        import time
+
+        with self._lock:
+            try:
+                self._conn.execute(
+                    "INSERT INTO stripe_events (event_id, event_type, processed_ts) "
+                    "VALUES (?, ?, ?)",
+                    (event_id, event_type, time.time()),
+                )
+                self._conn.commit()
+                return True
+            except sqlite3.IntegrityError:
+                return False
 
     def close(self) -> None:
         with self._lock:

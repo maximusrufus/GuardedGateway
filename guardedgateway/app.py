@@ -516,9 +516,53 @@ async def dashboard(request: Request):
 
 
 @app.post("/billing/checkout/{tier}")
-async def checkout(tier: str):
-    result = billing.create_checkout_session(tier)
+async def checkout(tier: str, tenant: str, request: Request):
+    customer_email = request.query_params.get("customer_email")
+    result = billing.create_checkout_session(tier, tenant, customer_email=customer_email)
     return JSONResponse({"status": result.status, "url": result.url, "message": result.message})
+
+
+@app.post("/billing/portal")
+async def billing_portal(tenant: str):
+    store = get_tenant_store()
+    record = store.get_tenant(tenant)
+    if not record or not record.get("stripe_customer_id"):
+        raise HTTPException(status_code=404, detail={"error": "no_stripe_customer_for_tenant"})
+    result = billing.create_portal_session(record["stripe_customer_id"])
+    return JSONResponse({"status": result.status, "url": result.url, "message": result.message})
+
+
+_SUBSCRIPTION_TERMINAL_STATUSES = {"canceled", "unpaid", "incomplete_expired"}
+
+
+def _fulfill_checkout_session(store, session: dict) -> None:
+    """Only ever called after `payment_status != 'unpaid'` has been
+    confirmed by the webhook handler."""
+    tenant = billing.session_tenant(session)
+    if not tenant:
+        return
+    store.create_tenant(tenant)
+    customer_id = session.get("customer")
+    if customer_id:
+        store.set_stripe_customer(tenant, customer_id)
+
+
+def _handle_subscription_event(store, event_type: str, obj: dict) -> None:
+    customer_id = obj.get("customer")
+    if not customer_id:
+        return
+    record = store.resolve_tenant_by_customer_id(customer_id)
+    if not record:
+        return
+    tenant = record["name"]
+    if event_type == "customer.subscription.deleted":
+        store.set_subscription_state(tenant, obj.get("id"), "canceled")
+        store.revoke_tenant_keys(tenant)
+        return
+    status = obj.get("status")
+    store.set_subscription_state(tenant, obj.get("id"), status)
+    if event_type == "invoice.payment_failed":
+        store.revoke_tenant_keys(tenant)
 
 
 @app.post("/billing/webhook")
@@ -534,6 +578,41 @@ async def stripe_webhook(
     event = billing.verify_webhook_signature(payload, stripe_signature, secret)
     if event is None:
         raise HTTPException(status_code=400, detail={"error": "invalid_signature"})
+
+    store = get_tenant_store()
+    event_id = event.get("id") or ""
+    event_type = event.get("type", "")
+    if event_id and not store.mark_event_processed(event_id, event_type):
+        return JSONResponse({"received": True, "duplicate": True})
+
+    obj = event.get("data", {}).get("object", {})
+
+    if event_type in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
+        if obj.get("payment_status") != "unpaid":
+            _fulfill_checkout_session(store, obj)
+    elif event_type in (
+        "customer.subscription.created",
+        "customer.subscription.updated",
+        "customer.subscription.deleted",
+    ):
+        _handle_subscription_event(store, event_type, obj)
+    elif event_type == "invoice.paid":
+        subscription_id = obj.get("subscription")
+        if subscription_id:
+            _handle_subscription_event(
+                store,
+                event_type,
+                {"customer": obj.get("customer"), "id": subscription_id, "status": "active"},
+            )
+    elif event_type == "invoice.payment_failed":
+        subscription_id = obj.get("subscription")
+        if subscription_id:
+            _handle_subscription_event(
+                store,
+                event_type,
+                {"customer": obj.get("customer"), "id": subscription_id, "status": "past_due"},
+            )
+
     return JSONResponse({"received": True})
 
 

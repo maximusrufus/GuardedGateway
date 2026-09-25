@@ -70,6 +70,35 @@ the file for your own account rather than trusting it as a live feed.
 no-op. See `guardedgateway/spend_guard.py` and `PROVENANCE.md` for why this differs
 from the an internal module code it was ported from.
 
+## Stripe
+
+- **Key management**: `STRIPE_SECRET_KEY` should be a **restricted key**
+  (`rk_...`) scoped to only what this app needs (Checkout Sessions write,
+  Billing Portal write, Customers read, Subscriptions read, Webhook
+  Endpoints read) -- never a full secret key. In production, source it from
+  **Google Secret Manager**, not a committed `.env`. `scripts/check_no_stripe_keys.py`
+  (wired into `.pre-commit-config.yaml`) fails the build if a live/test
+  secret is ever committed.
+- **Bootstrap**: `python scripts/stripe_bootstrap.py` idempotently creates
+  one Stripe Product per tier (team, clinic, health_system) plus their
+  Prices, and a webhook endpoint if `STRIPE_WEBHOOK_URL` is set.
+- **Webhook events subscribed** (`POST /billing/webhook`):
+  `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+  `checkout.session.async_payment_failed`, `customer.subscription.created`,
+  `customer.subscription.updated`, `customer.subscription.deleted`,
+  `invoice.paid`, `invoice.payment_failed`. Every event is signature-verified
+  first (400 on failure) and idempotency-deduped by event id before any
+  tenant state changes.
+- **Customer Portal**: `POST /billing/portal?tenant=...` returns a
+  Stripe-hosted Customer Portal URL for a tenant with a stored Stripe
+  customer id.
+- **`APP_BASE_URL`** builds Checkout/Portal success, cancel, and return
+  URLs -- set it in every real environment (defaults to `http://localhost:8000`
+  for local dev only).
+- **Tax**: enable Stripe Tax + register in each jurisdiction before charging
+  US/EU customers -- `automatic_tax` is **not** enabled by default and
+  Stripe silently collects no tax without an active registration.
+
 ## Admin CLI
 
 ```bash

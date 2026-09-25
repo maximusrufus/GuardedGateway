@@ -28,6 +28,7 @@ dev = [
     "ruff>=0.5",
 ]
 tiktoken = ["tiktoken>=0.7"]
+stripe = ["stripe>=15"]
 
 [project.scripts]
 guardedgateway = "guardedgateway.cli:main"

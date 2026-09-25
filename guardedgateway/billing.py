@@ -1,16 +1,21 @@
-"""Stripe billing stub — Checkout session creation + webhook verification.
+"""Stripe billing — Checkout session creation + webhook verification.
 
 Three-tier fallback, all local/test-safe:
 1. Real Stripe: only if STRIPE_SECRET_KEY and a STRIPE_PRICE_* env var are
-   set. Calls the real Stripe API via `stripe_client` (injectable so tests
-   never hit the network — see tests/test_billing.py).
+   set. Calls the real Stripe API via an injectable client factory (tests
+   never hit the network — see tests/test_billing.py). Uses
+   `stripe.StripeClient` (never the deprecated global `stripe.api_key = ...`
+   pattern). `STRIPE_SECRET_KEY` should be a **restricted key** (`rk_...`)
+   scoped to the minimum permissions this app needs; in production it must
+   come from Secret Manager, never a committed `.env` file.
 2. Static payment link: PAYMENT_LINK_URL env var, if Stripe isn't configured.
 3. "billing not configured": neither is set.
 
 Webhook verification uses `stripe.Webhook.construct_event` semantics but
 implemented locally (HMAC-SHA256 over timestamp+payload, matching Stripe's
 documented scheme) so this module has no hard dependency on the `stripe`
-SDK — it's optional, imported lazily only when STRIPE_SECRET_KEY is set.
+SDK for signature checking — it's optional, imported lazily only when
+actually creating a Checkout/Portal session.
 """
 
 from __future__ import annotations
@@ -18,10 +23,14 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+import random
+import string
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+
+APP_NAME = "guardedgateway"
 
 TIER_PRICES_USD = {
     "team": 199,
@@ -43,14 +52,34 @@ def _stripe_configured(tier: str) -> tuple[str | None, str | None]:
     return secret, price
 
 
+def _app_base_url() -> str:
+    return os.environ.get("APP_BASE_URL", "http://localhost:8000").rstrip("/")
+
+
+def _integration_identifier(flow: str) -> str:
+    suffix = "".join(random.choices(string.ascii_lowercase, k=8))
+    return f"{APP_NAME}-{flow}-{suffix}"
+
+
+def get_client(secret_key: str):
+    """Instantiate a `StripeClient`. Imports `stripe` lazily so it is only
+    required when Stripe is actually configured."""
+    import stripe  # noqa: PLC0415
+
+    return stripe.StripeClient(secret_key)
+
+
 def create_checkout_session(
     tier: str,
+    tenant: str,
     *,
+    customer_email: str | None = None,
     stripe_checkout_create: Callable[..., dict] | None = None,
 ) -> CheckoutResult:
     """`stripe_checkout_create` is injected in tests to avoid a real Stripe
-    call; production code (not exercised in tests) would default it to
-    `stripe.checkout.Session.create`."""
+    call; production code defaults it to a real `StripeClient`'s
+    `v1.checkout.sessions.create`. `client_reference_id` is set to the
+    tenant name -- the authoritative link back to this app's tenant store."""
     if tier not in TIER_PRICES_USD:
         return CheckoutResult(status="not_configured", message=f"unknown tier {tier!r}")
 
@@ -59,21 +88,26 @@ def create_checkout_session(
         creator = stripe_checkout_create
         if creator is None:
             try:
-                import stripe
-
-                stripe.api_key = secret
-                creator = stripe.checkout.Session.create
+                client = get_client(secret)
+                creator = client.v1.checkout.sessions.create
             except ImportError:
                 return CheckoutResult(
                     status="not_configured",
                     message="STRIPE_SECRET_KEY is set but the stripe package isn't installed",
                 )
-        session = creator(
-            mode="subscription",
-            line_items=[{"price": price, "quantity": 1}],
-            success_url=os.environ.get("STRIPE_SUCCESS_URL", "https://example.com/success"),
-            cancel_url=os.environ.get("STRIPE_CANCEL_URL", "https://example.com/cancel"),
-        )
+        base = _app_base_url()
+        params: dict[str, Any] = {
+            "mode": "subscription",
+            "line_items": [{"price": price, "quantity": 1}],
+            "success_url": f"{base}/billing/success?session_id={{CHECKOUT_SESSION_ID}}",
+            "cancel_url": f"{base}/billing/cancel",
+            "client_reference_id": tenant,
+            "integration_identifier": _integration_identifier(tier),
+            "subscription_data": {"metadata": {"tenant": tenant}},
+        }
+        if customer_email:
+            params["customer_email"] = customer_email
+        session = creator(**params)
         url = session["url"] if isinstance(session, dict) else session.url
         return CheckoutResult(status="stripe_session", url=url)
 
@@ -82,6 +116,23 @@ def create_checkout_session(
         return CheckoutResult(status="payment_link", url=static_link)
 
     return CheckoutResult(status="not_configured", message="billing not configured")
+
+
+def create_portal_session(
+    customer_id: str, *, stripe_portal_create: Callable[..., dict] | None = None
+) -> CheckoutResult:
+    """Create a Billing Portal session for a stored Stripe customer id."""
+    secret = os.environ.get("STRIPE_SECRET_KEY")
+    creator = stripe_portal_create
+    if creator is None:
+        if not secret:
+            return CheckoutResult(status="not_configured", message="billing not configured")
+        client = get_client(secret)
+        creator = client.v1.billing_portal.sessions.create
+    base = _app_base_url()
+    session = creator(customer=customer_id, return_url=f"{base}/billing/portal-return")
+    url = session["url"] if isinstance(session, dict) else session.url
+    return CheckoutResult(status="stripe_session", url=url)
 
 
 def verify_webhook_signature(
@@ -112,3 +163,13 @@ def verify_webhook_signature(
         return json.loads(payload)
     except json.JSONDecodeError:
         return None
+
+
+def session_tenant(session: dict) -> str | None:
+    """Resolve the tenant for a Checkout Session: prefer the first-class
+    `client_reference_id`; fall back to subscription metadata only if unset."""
+    tenant = session.get("client_reference_id")
+    if tenant:
+        return tenant
+    metadata = session.get("metadata") or {}
+    return metadata.get("tenant")
