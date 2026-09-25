@@ -1,11 +1,11 @@
 """Local-first + cloud-spend-block gates, checked before ANY upstream call.
 
-Ported from ReviewHouse's `reviewhouse/local_first.py` (LocalFirstRequired)
+Ported from an internal local-first gate (LocalFirstRequired)
 and the `CloudSpendBlocked`/`cloud_llm_allowed()` pair in
 `reviewhouse/llm.py`. Adapted for a live request-serving gateway rather than
 a batch eval script:
 
-ReviewHouse's `local_first.require_local_first()` keys off "has this SCRIPT
+the original local-first gate keys off "has this SCRIPT
 (sys.argv[0]) recorded a recent local run" — a receipt file per task. That
 concept doesn't map onto a gateway serving concurrent requests from many
 callers with no single "task identity", so GuardedGateway's local-first gate

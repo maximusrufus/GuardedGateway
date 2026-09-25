@@ -1,6 +1,6 @@
 """Durable, append-only, month-to-date spend ledger backed by SQLite.
 
-Ported from the *concept* of ReviewHouse's `reviewhouse/spend_ledger.py`
+Ported from the *concept* of an internal spend ledger
 (cross-process durable total so N processes cannot each get their own $5),
 but re-implemented against SQLite instead of a JSON file because GuardedGateway
 is a long-running multi-worker service, not a batch script — SQLite gives us

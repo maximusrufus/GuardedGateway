@@ -1,10 +1,10 @@
 """Pre-call spend cap enforcement.
 
-Ported from ReviewHouse's `reviewhouse/spend_guard.py` (SpendCapExceeded,
+Ported from an internal spend guard (SpendCapExceeded,
 CallCapExceeded, refuse_if_over_cap) — same idea, DELIBERATELY DIFFERENT
 zero-cap behavior. See PROVENANCE.md for the full writeup; short version:
 
-ReviewHouse's SpendGuardLLM treats `cap_usd <= 0` as "skip checks" (0 was its
+The original SpendGuardLLM treats `cap_usd <= 0` as "skip checks" (0 was its
 convention for "local backend, nothing to guard"). GuardedGateway is a
 gateway whose whole product claim is "cannot overspend" for BYOK cloud
 traffic, so here `cap == 0` means the opposite: explicitly deny every

@@ -1,6 +1,6 @@
 """Optional per-key prompt-injection guard.
 
-Ported (trimmed) from ReviewHouse's `reviewhouse/injection_guard.py`
+Ported (trimmed) from an internal prompt-injection guard
 (InstructionPatternFilter): a small, explicit, case-insensitive regex
 catalog for instruction-shaped text ("ignore previous instructions",
 role-reassignment, chat-control tokens, etc). Recall-oriented: a false

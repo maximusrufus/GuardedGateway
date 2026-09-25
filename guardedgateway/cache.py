@@ -1,12 +1,12 @@
 """Response cache (content-hash keyed) and per-provider circuit breaker.
 
-Cache key logic ported from ReviewHouse's `reviewhouse/llm_cache.py`
+Cache key logic ported from an internal LLM cache module
 (`cache_key`: sha256 over model + normalized request fields, NUL-joined).
 Store is an in-memory dict with TTL instead of the source's JSONL file —
 simpler is fine per the task spec, and a gateway process doesn't need the
 cache to survive a restart the way a multi-day eval script's cache does.
 
-Circuit breaker pattern ported from HealthShield's `Backend/core/cache.py`
+Circuit breaker pattern ported from an internal Redis-with-fallback cache
 Redis circuit breaker: N consecutive failures opens the breaker; it
 half-opens after a backoff and re-probes; a success closes it and resets the
 backoff; a failure while half-open re-opens with the backoff doubled (capped).

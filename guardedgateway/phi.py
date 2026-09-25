@@ -1,11 +1,11 @@
 """PHI detection and redaction.
 
 Merged/ported from two sources (see PROVENANCE.md for exact provenance):
-- ReviewHouse's `reviewhouse/determination.py` (lines ~505-660): the
+- an internal PHI redaction block: the
   `_PHI_PATTERNS` catalog, `scan_phi`/`redact_phi` span-scan-and-splice
   approach (longest-match-wins overlap removal, splice from the end so
   earlier offsets stay valid).
-- HealthShield's `Backend/core/security_hardening.py`: `scrub_phi` /
+- an internal security-hardening module: `scrub_phi` /
   `scrub_dict` — the recursive dict-scrubbing helper for structured logs.
 
 Recall-oriented by design (same rationale as both sources): a false positive
@@ -123,7 +123,7 @@ def redact_phi(text: str) -> tuple[str, int, dict[str, int]]:
 def scrub_dict(d: dict, sensitive_keys: set[str] | None = None) -> dict:
     """Recursively redact string values in a dict — used before anything is
     logged. Keys named like an identifier (ssn, mrn, dob, ...) are replaced
-    outright regardless of pattern match, matching HealthShield's
+    outright regardless of pattern match, matching the original module's
     `scrub_dict` convention."""
     sensitive_keys = sensitive_keys or {
         "ssn",
