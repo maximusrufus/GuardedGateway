@@ -98,3 +98,7 @@ Apache-2.0. See `LICENSE`.
 Several modules port logic (gate order, redaction patterns, circuit-breaker shape)
 from other local repos, adapted for a standalone open-source gateway. See
 `PROVENANCE.md` for the full file-by-file list and what changed.
+
+## Live staging
+
+https://guardedgateway-771787148187.us-central1.run.app (Cloud Run, us-central1, min-instances 0; ephemeral storage until a volume or Postgres is configured; Stripe not yet configured).
