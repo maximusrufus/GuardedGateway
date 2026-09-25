@@ -104,11 +104,16 @@ def _global_cap() -> float | None:
     return float(raw) if raw else None
 
 
-def _effective_cap(key_cap: float | None) -> float | None:
-    """A per-key cap always wins if set; otherwise fall back to the global
-    env default. `None` from both means no cap is configured."""
+def _effective_cap(key_cap: float | None, tenant: str | None = None) -> float | None:
+    """A per-key cap always wins if set; otherwise fall back to the tenant's
+    tier-derived default cap; otherwise the global env default. `None` from
+    all three means no cap is configured."""
     if key_cap is not None:
         return key_cap
+    if tenant is not None:
+        tenant_cap = get_tenant_store().get_tenant_cap(tenant)
+        if tenant_cap is not None:
+            return tenant_cap
     return _global_cap()
 
 
@@ -187,7 +192,7 @@ async def _call_with_gates(
     # fallback chain. Policy refusals raise immediately, chain index 0 only.
     last_error: Exception | None = None
     for idx, provider_name in enumerate(chain):
-        cap = _effective_cap(key_record.cap_usd)
+        cap = _effective_cap(key_record.cap_usd, tenant=key_record.tenant)
         try:
             cloud_gate.require_cloud_allowed(provider_name, cap_usd=cap)
         except cloud_gate.CloudSpendBlocked as e:
@@ -545,6 +550,19 @@ def _fulfill_checkout_session(store, session: dict) -> None:
     customer_id = session.get("customer")
     if customer_id:
         store.set_stripe_customer(tenant, customer_id)
+
+    # Resolve + validate the tier server-side. A missing or unrecognized
+    # tier grants NOTHING -- never default a tenant into any tier, and
+    # above all never into the most expensive one.
+    tier = billing.session_tier(session)
+    if tier and tier in billing.TIER_PRICES_USD:
+        store.set_tier(tenant, tier)
+    else:
+        logger.warning(
+            "checkout fulfilled for tenant=%s with unresolvable tier=%r; granting no tier",
+            tenant,
+            tier,
+        )
 
 
 def _handle_subscription_event(store, event_type: str, obj: dict) -> None:

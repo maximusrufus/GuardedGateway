@@ -58,3 +58,69 @@ def test_cli_create_key_and_set_cap(capsys, tenant_store):
 def test_cli_set_cap_unknown_key_errors(capsys, tenant_store):
     rc = cli.main(["set-cap", "gg-unknown", "1.0"])
     assert rc == 1
+
+
+def test_concurrent_reader_does_not_block_webhook_write(tenant_store):
+    """Regression for the WAL/busy_timeout gap: a long-running reader on the
+    tenants DB must not turn a concurrent write into
+    `sqlite3.OperationalError: database is locked`."""
+    import sqlite3
+    import threading
+    import time
+
+    tenant_store.create_tenant("acme")
+
+    reader_started = threading.Event()
+    release_reader = threading.Event()
+
+    def hold_read_transaction():
+        conn = sqlite3.connect(str(tenant_store.path), timeout=15.0)
+        conn.execute("BEGIN")
+        conn.execute("SELECT * FROM tenants")
+        reader_started.set()
+        release_reader.wait(timeout=5.0)
+        conn.commit()
+        conn.close()
+
+    t = threading.Thread(target=hold_read_transaction)
+    t.start()
+    assert reader_started.wait(timeout=2.0)
+
+    start = time.monotonic()
+    try:
+        tenant_store.set_stripe_customer("acme", "cus_concurrent")
+    finally:
+        release_reader.set()
+        t.join(timeout=5.0)
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 2.0
+    assert tenant_store.get_tenant("acme")["stripe_customer_id"] == "cus_concurrent"
+
+
+def test_set_tier_marks_plan_active(tenant_store):
+    tenant_store.create_tenant("acme")
+    tenant_store.set_tier("acme", "clinic")
+    record = tenant_store.get_tenant("acme")
+    assert record["tier"] == "clinic"
+    assert record["plan_active"] is True
+
+
+def test_get_tenant_cap_uses_tier_default(tenant_store):
+    tenant_store.create_tenant("acme")
+    tenant_store.set_tier("acme", "team")
+    assert tenant_store.get_tenant_cap("acme") == 500.0
+
+
+def test_get_tenant_cap_none_without_active_tier(tenant_store):
+    tenant_store.create_tenant("acme")
+    assert tenant_store.get_tenant_cap("acme") is None
+
+
+def test_revoke_clears_plan_active(tenant_store):
+    tenant_store.create_tenant("acme")
+    tenant_store.set_tier("acme", "health_system")
+    tenant_store.revoke_tenant_keys("acme")
+    record = tenant_store.get_tenant("acme")
+    assert record["plan_active"] is False
+    assert tenant_store.get_tenant_cap("acme") is None

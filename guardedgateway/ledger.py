@@ -88,8 +88,9 @@ class Ledger:
         self.path = Path(path) if path is not None else db_path()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
-        self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
+        self._conn = sqlite3.connect(str(self.path), check_same_thread=False, timeout=15.0)
         self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout = 15000")
         with self._lock:
             self._conn.executescript(_SCHEMA)
             self._conn.commit()

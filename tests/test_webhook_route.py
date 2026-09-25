@@ -112,6 +112,83 @@ def test_webhook_subscription_deleted_downgrades(client, monkeypatch, tenant_sto
     assert key_record.cap_usd == 0
 
 
+def _checkout_completed_payload_with_tier(
+    event_id="evt_tier", tenant="tenant-tier", tier="clinic", payment_status="paid"
+):
+    return json.dumps(
+        {
+            "id": event_id,
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "client_reference_id": tenant,
+                    "payment_status": payment_status,
+                    "customer": "cus_tier",
+                    "metadata": {"tenant": tenant, "tier": tier},
+                }
+            },
+        }
+    ).encode()
+
+
+def test_webhook_checkout_completed_records_valid_tier(client, monkeypatch, tenant_store):
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test")
+    payload = _checkout_completed_payload_with_tier(tenant="tenant-tier-ok", tier="clinic")
+    header = _sign(payload, "whsec_test")
+    resp = client.post("/billing/webhook", content=payload, headers={"Stripe-Signature": header})
+    assert resp.status_code == 200
+    record = tenant_store.get_tenant("tenant-tier-ok")
+    assert record["tier"] == "clinic"
+    assert record["plan_active"] is True
+    assert tenant_store.get_tenant_cap("tenant-tier-ok") == 2000.0
+
+
+def test_webhook_checkout_completed_unknown_tier_grants_nothing(client, monkeypatch, tenant_store):
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test")
+    payload = _checkout_completed_payload_with_tier(
+        tenant="tenant-tier-bad", tier="platinum-plus-unknown"
+    )
+    header = _sign(payload, "whsec_test")
+    resp = client.post("/billing/webhook", content=payload, headers={"Stripe-Signature": header})
+    assert resp.status_code == 200
+    record = tenant_store.get_tenant("tenant-tier-bad")
+    assert record is not None  # tenant is still created
+    assert record["tier"] is None
+    assert record["plan_active"] is False
+
+
+def test_webhook_checkout_completed_missing_tier_grants_nothing(client, monkeypatch, tenant_store):
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test")
+    payload = _checkout_completed_payload(event_id="evt_no_tier", tenant="tenant-no-tier")
+    header = _sign(payload, "whsec_test")
+    resp = client.post("/billing/webhook", content=payload, headers={"Stripe-Signature": header})
+    assert resp.status_code == 200
+    record = tenant_store.get_tenant("tenant-no-tier")
+    assert record["tier"] is None
+    assert record["plan_active"] is False
+
+
+def test_webhook_subscription_deleted_clears_tier(client, monkeypatch, tenant_store):
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test")
+    tenant_store.create_tenant("tenant-sub-tier")
+    tenant_store.set_tier("tenant-sub-tier", "health_system")
+    tenant_store.set_stripe_customer("tenant-sub-tier", "cus_sub_tier")
+
+    payload = json.dumps(
+        {
+            "id": "evt_sub_deleted_tier",
+            "type": "customer.subscription.deleted",
+            "data": {"object": {"id": "sub_2", "customer": "cus_sub_tier", "status": "canceled"}},
+        }
+    ).encode()
+    header = _sign(payload, "whsec_test")
+    resp = client.post("/billing/webhook", content=payload, headers={"Stripe-Signature": header})
+    assert resp.status_code == 200
+
+    assert tenant_store.get_tenant_cap("tenant-sub-tier") is None
+    assert tenant_store.get_tenant("tenant-sub-tier")["plan_active"] is False
+
+
 def test_billing_portal_404_for_unknown_tenant(client):
     resp = client.post("/billing/portal", params={"tenant": "no-such-tenant"})
     assert resp.status_code == 404

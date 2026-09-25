@@ -38,6 +38,16 @@ TIER_PRICES_USD = {
     "health_system": 999,
 }
 
+# Default monthly LLM-spend cap granted per tier when a key has no explicit
+# `cap_usd` override. Scaled roughly with the subscription price. Used as the
+# tertiary fallback in `app._effective_cap` (key cap -> tenant tier cap ->
+# global GG_MONTHLY_CAP_USD env default).
+TIER_CAPS_USD = {
+    "team": 500.0,
+    "clinic": 2000.0,
+    "health_system": 8000.0,
+}
+
 
 @dataclass
 class CheckoutResult:
@@ -103,7 +113,8 @@ def create_checkout_session(
             "cancel_url": f"{base}/billing/cancel",
             "client_reference_id": tenant,
             "integration_identifier": _integration_identifier(tier),
-            "subscription_data": {"metadata": {"tenant": tenant}},
+            "metadata": {"tenant": tenant, "tier": tier},
+            "subscription_data": {"metadata": {"tenant": tenant, "tier": tier}},
         }
         if customer_email:
             params["customer_email"] = customer_email
@@ -173,3 +184,17 @@ def session_tenant(session: dict) -> str | None:
         return tenant
     metadata = session.get("metadata") or {}
     return metadata.get("tenant")
+
+
+def session_tier(session: dict) -> str | None:
+    """Resolve the tier from a Checkout Session's metadata. Checks top-level
+    metadata first, then subscription_data-style nested metadata (present on
+    the `customer.subscription.*` object shape). Caller must still validate
+    the result against `TIER_PRICES_USD` -- this only extracts the raw
+    string, it never defaults to a tier."""
+    metadata = session.get("metadata") or {}
+    tier = metadata.get("tier")
+    if tier:
+        return tier
+    nested = (session.get("subscription_data") or {}).get("metadata") or {}
+    return nested.get("tier")

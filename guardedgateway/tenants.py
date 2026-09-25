@@ -22,7 +22,9 @@ CREATE TABLE IF NOT EXISTS tenants (
     created_ts REAL NOT NULL,
     stripe_customer_id TEXT,
     stripe_subscription_id TEXT,
-    subscription_status TEXT
+    subscription_status TEXT,
+    tier TEXT,
+    plan_active INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS api_keys (
     api_key TEXT PRIMARY KEY,
@@ -49,6 +51,8 @@ _TENANT_MIGRATION_COLUMNS = (
     "stripe_customer_id TEXT",
     "stripe_subscription_id TEXT",
     "subscription_status TEXT",
+    "tier TEXT",
+    "plan_active INTEGER NOT NULL DEFAULT 0",
 )
 
 
@@ -66,8 +70,16 @@ class TenantStore:
         self.path = Path(path) if path is not None else ledger.db_path()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
-        self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
+        # `timeout` makes a writer wait for a competing write instead of
+        # raising immediately, and WAL + busy_timeout let this store's writes
+        # (the Stripe webhook fulfillment path) proceed alongside a concurrent
+        # reader instead of raising `sqlite3.OperationalError: database is
+        # locked` -> HTTP 500 -> Stripe retry. Mirrors ledger.py / IDRGateKit's
+        # db.py::get_connection().
+        self._conn = sqlite3.connect(str(self.path), check_same_thread=False, timeout=15.0)
         with self._lock:
+            self._conn.execute("PRAGMA journal_mode = WAL")
+            self._conn.execute("PRAGMA busy_timeout = 15000")
             self._conn.executescript(_SCHEMA)
             for column in _TENANT_MIGRATION_COLUMNS:
                 try:
@@ -178,7 +190,7 @@ class TenantStore:
         with self._lock:
             cur = self._conn.execute(
                 "SELECT name, stripe_customer_id, stripe_subscription_id, "
-                "subscription_status FROM tenants WHERE name = ?",
+                "subscription_status, tier, plan_active FROM tenants WHERE name = ?",
                 (name,),
             )
             row = cur.fetchone()
@@ -189,13 +201,15 @@ class TenantStore:
             "stripe_customer_id": row[1],
             "stripe_subscription_id": row[2],
             "subscription_status": row[3],
+            "tier": row[4],
+            "plan_active": bool(row[5]),
         }
 
     def resolve_tenant_by_customer_id(self, customer_id: str) -> dict | None:
         with self._lock:
             cur = self._conn.execute(
                 "SELECT name, stripe_customer_id, stripe_subscription_id, "
-                "subscription_status FROM tenants WHERE stripe_customer_id = ?",
+                "subscription_status, tier, plan_active FROM tenants WHERE stripe_customer_id = ?",
                 (customer_id,),
             )
             row = cur.fetchone()
@@ -206,7 +220,32 @@ class TenantStore:
             "stripe_customer_id": row[1],
             "stripe_subscription_id": row[2],
             "subscription_status": row[3],
+            "tier": row[4],
+            "plan_active": bool(row[5]),
         }
+
+    def set_tier(self, tenant: str, tier: str) -> None:
+        """Record a validated tier for a tenant and mark the plan active.
+        Callers (webhook fulfillment) must validate `tier` against
+        `billing.TIER_PRICES_USD` BEFORE calling this -- this method does not
+        default or guess a tier."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE tenants SET tier = ?, plan_active = 1 WHERE name = ?",
+                (tier, tenant),
+            )
+            self._conn.commit()
+
+    def get_tenant_cap(self, tenant: str) -> float | None:
+        """Tier-derived monthly spend cap default for a tenant with no
+        explicit per-key cap_usd override. None if the tenant has no
+        recorded/active tier or the tier isn't in the price map."""
+        from guardedgateway import billing  # noqa: PLC0415 (avoid import cycle)
+
+        record = self.get_tenant(tenant)
+        if not record or not record["plan_active"] or not record["tier"]:
+            return None
+        return billing.TIER_CAPS_USD.get(record["tier"])
 
     def revoke_tenant_keys(self, tenant: str) -> None:
         """Downgrade/revoke: zero every key's cap for this tenant so further
@@ -215,6 +254,7 @@ class TenantStore:
         again once payment resumes."""
         with self._lock:
             self._conn.execute("UPDATE api_keys SET cap_usd = 0 WHERE tenant = ?", (tenant,))
+            self._conn.execute("UPDATE tenants SET plan_active = 0 WHERE name = ?", (tenant,))
             self._conn.commit()
 
     def mark_event_processed(self, event_id: str, event_type: str) -> bool:
