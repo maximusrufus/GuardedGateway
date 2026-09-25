@@ -130,4 +130,4 @@ from other local repos, adapted for a standalone open-source gateway. See
 
 ## Live staging
 
-https://guardedgateway-771787148187.us-central1.run.app (Cloud Run, us-central1, min-instances 0; ephemeral storage until a volume or Postgres is configured; Stripe not yet configured).
+https://guardedgateway-udrj5akpma-uc.a.run.app (Cloud Run, us-central1, project ripplarity-products (Ripplarity Inc), min-instances 0; ephemeral storage until a volume or Postgres is configured; Stripe not yet configured).
