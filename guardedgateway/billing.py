@@ -107,7 +107,7 @@ def create_checkout_session(
         }
         if customer_email:
             params["customer_email"] = customer_email
-        session = creator(**params)
+        session = creator(params)
         url = session["url"] if isinstance(session, dict) else session.url
         return CheckoutResult(status="stripe_session", url=url)
 
@@ -130,7 +130,7 @@ def create_portal_session(
         client = get_client(secret)
         creator = client.v1.billing_portal.sessions.create
     base = _app_base_url()
-    session = creator(customer=customer_id, return_url=f"{base}/billing/portal-return")
+    session = creator({"customer": customer_id, "return_url": f"{base}/billing/portal-return"})
     url = session["url"] if isinstance(session, dict) else session.url
     return CheckoutResult(status="stripe_session", url=url)
 

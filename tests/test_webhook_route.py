@@ -121,8 +121,8 @@ def test_billing_portal_success(client, monkeypatch, tenant_store):
     tenant_store.create_tenant("tenant-portal")
     tenant_store.set_stripe_customer("tenant-portal", "cus_portal")
 
-    def fake_portal_create(**kwargs):
-        assert kwargs["customer"] == "cus_portal"
+    def fake_portal_create(params):
+        assert params["customer"] == "cus_portal"
         return {"url": "https://billing.stripe.example/portal_1"}
 
     from guardedgateway import billing as billing_module

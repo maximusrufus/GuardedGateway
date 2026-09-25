@@ -26,8 +26,8 @@ def test_checkout_uses_mocked_stripe_when_configured(monkeypatch):
 
     captured = {}
 
-    def fake_create(**kwargs):
-        captured.update(kwargs)
+    def fake_create(params):
+        captured.update(params)
         return {"url": "https://checkout.stripe.com/fake-session"}
 
     result = billing.create_checkout_session("team", "tenant-1", stripe_checkout_create=fake_create)
@@ -45,8 +45,8 @@ def test_checkout_customer_email_passed_through(monkeypatch):
 
     captured = {}
 
-    def fake_create(**kwargs):
-        captured.update(kwargs)
+    def fake_create(params):
+        captured.update(params)
         return {"url": "https://checkout.stripe.com/fake-session"}
 
     billing.create_checkout_session(
@@ -61,8 +61,8 @@ def test_checkout_unknown_tier():
 
 
 def test_create_portal_session_mocked():
-    def fake_create(**kwargs):
-        assert kwargs["customer"] == "cus_1"
+    def fake_create(params):
+        assert params["customer"] == "cus_1"
         return {"url": "https://billing.stripe.com/portal_1"}
 
     result = billing.create_portal_session("cus_1", stripe_portal_create=fake_create)
