@@ -39,6 +39,31 @@ def test_checkout_uses_mocked_stripe_when_configured(monkeypatch):
     assert captured["integration_identifier"].startswith("guardedgateway-team-")
 
 
+def test_statement_descriptor_suffix_fits_stripe_budget():
+    suffix = billing.STATEMENT_DESCRIPTOR_SUFFIX
+    assert len(suffix) <= 15
+    assert all(c.isalnum() or c == " " for c in suffix)
+    assert not any(c in suffix for c in "<>\\'\"*")
+
+
+def test_checkout_subscription_omits_payment_intent_data(monkeypatch):
+    """Every guardedgateway tier is mode='subscription'; Stripe rejects
+    `payment_intent_data` on a subscription-mode Checkout Session, so the
+    statement descriptor must come from the Product, not the session."""
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "rk_test_fake")
+    monkeypatch.setenv("STRIPE_PRICE_TEAM", "price_fake_team")
+
+    captured = {}
+
+    def fake_create(params):
+        captured.update(params)
+        return {"url": "https://checkout.stripe.com/fake-session"}
+
+    billing.create_checkout_session("team", "tenant-1", stripe_checkout_create=fake_create)
+    assert captured["mode"] == "subscription"
+    assert "payment_intent_data" not in captured
+
+
 def test_checkout_customer_email_passed_through(monkeypatch):
     monkeypatch.setenv("STRIPE_SECRET_KEY", "rk_test_fake")
     monkeypatch.setenv("STRIPE_PRICE_TEAM", "price_fake_team")
