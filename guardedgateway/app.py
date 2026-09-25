@@ -58,10 +58,6 @@ PUBLIC_ROUTES = {
         "starts a Stripe Checkout session for a caller-supplied tenant name; "
         "returns a checkout URL only, reads no spend/key/tenant data"
     ),
-    ("POST", "/billing/portal"): (
-        "looks up a tenant by caller-supplied name only to build a Stripe "
-        "portal redirect; no spend/key data rendered"
-    ),
     ("GET", "/openapi.json"): "FastAPI auto-generated API schema, no tenant data",
     ("GET", "/docs"): "FastAPI auto-generated Swagger UI, no tenant data",
     (
@@ -558,9 +554,17 @@ async def checkout(tier: str, tenant: str, request: Request):
 
 
 @app.post("/billing/portal")
-async def billing_portal(tenant: str):
+async def billing_portal(authorization: str | None = Header(default=None)):
+    """Open the Stripe Customer Portal for the CALLING tenant.
+
+    The tenant is taken from the authenticated API key and never from a
+    request parameter. A caller-supplied tenant name here was an
+    authorization hole: tenant names are human-chosen and guessable, and a
+    Customer Portal session lets the holder read invoices, change the
+    payment method and cancel the subscription."""
+    key_record = _resolve_api_key_record(authorization)
     store = get_tenant_store()
-    record = store.get_tenant(tenant)
+    record = store.get_tenant(key_record.tenant)
     if not record or not record.get("stripe_customer_id"):
         raise HTTPException(status_code=404, detail={"error": "no_stripe_customer_for_tenant"})
     result = billing.create_portal_session(record["stripe_customer_id"])

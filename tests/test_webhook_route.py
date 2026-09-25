@@ -189,8 +189,12 @@ def test_webhook_subscription_deleted_clears_tier(client, monkeypatch, tenant_st
     assert tenant_store.get_tenant("tenant-sub-tier")["plan_active"] is False
 
 
-def test_billing_portal_404_for_unknown_tenant(client):
-    resp = client.post("/billing/portal", params={"tenant": "no-such-tenant"})
+def test_billing_portal_404_when_tenant_has_no_stripe_customer(client, tenant_store):
+    """An authenticated tenant with no Stripe customer gets 404. An
+    UNAUTHENTICATED caller never reaches this point -- see
+    tests/test_portal_authz.py."""
+    key = tenant_store.create_key("tenant-no-customer")
+    resp = client.post("/billing/portal", headers={"Authorization": f"Bearer {key}"})
     assert resp.status_code == 404
 
 
@@ -211,6 +215,10 @@ def test_billing_portal_success(client, monkeypatch, tenant_store):
             status="stripe_session", url="https://billing.stripe.example/portal_1"
         ),
     )
-    resp = client.post("/billing/portal", params={"tenant": "tenant-portal"})
+    key = tenant_store.create_key("tenant-portal") if hasattr(tenant_store, "create_key") else None
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    # The portal opens for the tenant owning the KEY; the `tenant` param is
+    # never read (see tests/test_portal_authz.py).
+    resp = client.post("/billing/portal", headers=headers)
     assert resp.status_code == 200
     assert resp.json()["url"] == "https://billing.stripe.example/portal_1"
