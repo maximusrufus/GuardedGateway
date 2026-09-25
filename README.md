@@ -131,3 +131,5 @@ from other local repos, adapted for a standalone open-source gateway. See
 ## Live staging
 
 https://guardedgateway-udrj5akpma-uc.a.run.app (Cloud Run, us-central1, project ripplarity-products (Ripplarity Inc), min-instances 0; ephemeral storage until a volume or Postgres is configured; Stripe not yet configured).
+
+Liveness path in production is `GET /health`, not `/healthz` — Google Front End on Cloud Run intercepts the exact path `/healthz` and returns its own 404 page before the request ever reaches the container, so a monitor pointed at `/healthz` will misreport the service as down. `/healthz` is still registered for other environments; point Cloud Run health checks and uptime monitors at `/health`.

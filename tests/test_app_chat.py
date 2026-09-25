@@ -97,3 +97,11 @@ def test_healthz(client):
     resp = client.get("/healthz")
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
+
+
+def test_health(client):
+    # /healthz is intercepted by Google Front End on Cloud Run and never
+    # reaches the container; /health is the reachable liveness path in prod.
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok"}

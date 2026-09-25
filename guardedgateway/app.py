@@ -52,6 +52,11 @@ app = FastAPI(title="GuardedGateway", version="0.1.0")
 # route FastAPI has registered and fails closed on anything missing here.
 PUBLIC_ROUTES = {
     ("GET", "/healthz"): "liveness probe, no data",
+    ("GET", "/health"): (
+        "liveness probe, no data; /healthz is intercepted by Google Front End on "
+        "Cloud Run and never reaches the container, /health is the reachable "
+        "liveness path in production"
+    ),
     ("GET", "/"): "marketing landing page",
     ("POST", "/billing/webhook"): "Stripe webhook, verified by HMAC signature not API key",
     ("POST", "/billing/checkout/{tier}"): (
@@ -670,4 +675,9 @@ async def stripe_webhook(
 
 @app.get("/healthz")
 async def healthz():
+    return {"status": "ok"}
+
+
+@app.get("/health")
+async def health():
     return {"status": "ok"}
