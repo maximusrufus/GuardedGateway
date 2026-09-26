@@ -23,6 +23,7 @@ from google.api_core.exceptions import NotFound, PreconditionFailed  # noqa: E40
 
 from guardedgateway import durable  # noqa: E402
 from guardedgateway.ledger import Ledger, LedgerEntry  # noqa: E402
+from guardedgateway.tenants import TenantStore  # noqa: E402
 
 
 class FakeBlob:
@@ -207,3 +208,113 @@ def test_inactive_when_bucket_unset(tmp_path, monkeypatch):
     assert ledger._durable_active is False
     ledger.record(_entry())
     ledger.close()
+
+
+# --- TenantStore: the money path (Stripe webhook fulfillment provisions API
+# keys through TenantStore, not Ledger) ---------------------------------
+
+
+def test_tenant_store_key_survives_fresh_process(tmp_path, fake_gcs, monkeypatch):
+    db_path = tmp_path / "i.db"
+    store1 = TenantStore(db_path)
+    raw_key = store1.create_key("acme", cap_usd=50.0)
+    store1.close()
+
+    # Simulate a brand-new process/instance: reset restored flag, new db path.
+    durable._restored = False
+    store2 = TenantStore(tmp_path / "i2.db")
+    record = store2.get_key(raw_key)
+    store2.close()
+    assert record is not None
+    assert record.tenant == "acme"
+    assert record.cap_usd == 50.0
+
+
+def test_tenant_store_write_uploads_once(tmp_path, fake_gcs, monkeypatch):
+    calls = _upload_count(monkeypatch, fake_gcs)
+    store = TenantStore(tmp_path / "j.db")
+    calls.clear()  # isolate the write under test from schema-creation's own commit
+    # A single write -> a single commit -> a single upload. (create_key()
+    # does two commits -- create_tenant()'s, then its own -- so it uploads
+    # twice; that's two separate writes, not one, and is covered by the
+    # "money path" restore test above via create_key's end-to-end effect.)
+    store.create_tenant("acme")
+    store.close()
+    assert len(calls) == 1
+
+
+def test_tenant_store_constructed_first_still_restores(tmp_path, fake_gcs, monkeypatch):
+    """No Ledger is ever constructed in this test -- TenantStore alone must
+    still call restore_once() and see prior state seeded directly in the
+    fake bucket. This is the exact ordering bug: before the fix, TenantStore
+    never called restore_once() at all."""
+    seed_conn = sqlite3.connect(str(tmp_path / "seed.db"))
+    seed_conn.execute(
+        "CREATE TABLE tenants (name TEXT PRIMARY KEY, created_ts REAL NOT NULL, "
+        "stripe_customer_id TEXT, stripe_subscription_id TEXT, subscription_status TEXT, "
+        "tier TEXT, plan_active INTEGER NOT NULL DEFAULT 0)"
+    )
+    seed_conn.execute("INSERT INTO tenants (name, created_ts, plan_active) VALUES ('seeded', 0, 1)")
+    seed_conn.commit()
+    snap = sqlite3.connect(":memory:")
+    seed_conn.backup(snap)
+    fake_gcs["data"] = bytes(snap.serialize())
+    fake_gcs["generation"] = 1
+    snap.close()
+    seed_conn.close()
+
+    store = TenantStore(tmp_path / "k.db")
+    tenant = store.get_tenant("seeded")
+    store.close()
+    assert tenant is not None
+    assert tenant["plan_active"] is True
+
+
+def test_ledger_and_tenant_writes_share_one_snapshot(tmp_path, fake_gcs, monkeypatch):
+    """Ledger and TenantStore point at the SAME file (both default to
+    ledger.db_path()) -- a write through either must show up in the other
+    after a restore, because it's one object, not two."""
+    db_path = tmp_path / "shared.db"
+    monkeypatch.setenv("GG_DB_PATH", str(db_path))
+
+    tenant_store = TenantStore(db_path)
+    raw_key = tenant_store.create_key("shared-tenant")
+
+    ledger = Ledger(db_path)
+    ledger.record(_entry(tenant="shared-tenant", api_key=raw_key))
+
+    tenant_store.close()
+    ledger.close()
+
+    # Fresh process, fresh files: restore must bring back both the tenant
+    # store's key AND the ledger's spend row from the one shared snapshot.
+    durable._restored = False
+    fresh_path = tmp_path / "shared2.db"
+    fresh_tenants = TenantStore(fresh_path)
+    fresh_ledger = Ledger(fresh_path)
+
+    record = fresh_tenants.get_key(raw_key)
+    spent = fresh_ledger.spent_usd(api_key=raw_key)
+
+    fresh_tenants.close()
+    fresh_ledger.close()
+
+    assert record is not None
+    assert record.tenant == "shared-tenant"
+    assert spent == 1.0
+
+
+def test_tenant_store_inactive_when_bucket_unset(tmp_path, monkeypatch):
+    monkeypatch.delenv("GUARDEDGATEWAY_GCS_BUCKET", raising=False)
+    calls = []
+    original = FakeBlob.upload_from_string
+    monkeypatch.setattr(
+        FakeBlob,
+        "upload_from_string",
+        lambda self, *a, **kw: calls.append(1) or original(self, *a, **kw),
+    )
+    store = TenantStore(tmp_path / "l.db")
+    assert store._durable_active is False
+    store.create_key("acme")
+    store.close()
+    assert len(calls) == 0
