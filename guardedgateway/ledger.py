@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from guardedgateway import durable
+
 DEFAULT_DB_PATH = "data/guardedgateway.db"
 
 _SCHEMA = """
@@ -88,12 +90,17 @@ class Ledger:
         self.path = Path(path) if path is not None else db_path()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
+        self._durable_active = str(self.path) != ":memory:" and durable.is_active()
+        if self._durable_active:
+            durable.restore_once(str(self.path))
         self._conn = sqlite3.connect(str(self.path), check_same_thread=False, timeout=15.0)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA busy_timeout = 15000")
+        self._persisted_changes = 0
         with self._lock:
             self._conn.executescript(_SCHEMA)
             self._conn.commit()
+            self._persisted_changes = self._conn.total_changes
 
     @contextmanager
     def _cursor(self):
@@ -101,7 +108,13 @@ class Ledger:
             cur = self._conn.cursor()
             try:
                 yield cur
+                # Gate on total_changes (not just "did we run a commit") so a
+                # no-op commit and pure reads never trigger a GCS upload.
+                changed = self._conn.total_changes != self._persisted_changes
                 self._conn.commit()
+                if self._durable_active and changed:
+                    durable.persist(self._conn)
+                    self._persisted_changes = self._conn.total_changes
             finally:
                 cur.close()
 

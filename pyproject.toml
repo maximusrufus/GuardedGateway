@@ -26,9 +26,11 @@ dev = [
     "pytest-asyncio>=0.23",
     "respx>=0.21",
     "ruff>=0.5",
+    "google-cloud-storage>=2.16",  # exercises guardedgateway/durable.py's fake-GCS tests
 ]
 tiktoken = ["tiktoken>=0.7"]
 stripe = ["stripe>=15"]
+gcs = ["google-cloud-storage>=2.16"]
 
 [project.scripts]
 guardedgateway = "guardedgateway.cli:main"
