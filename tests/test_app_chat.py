@@ -93,6 +93,12 @@ def test_landing_page_renders(client):
     assert "199" in resp.text and "499" in resp.text and "999" in resp.text
 
 
+def test_landing_page_has_working_contact_route(client):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "mailto:support@ripplarity.com" in resp.text
+
+
 def test_healthz(client):
     resp = client.get("/healthz")
     assert resp.status_code == 200

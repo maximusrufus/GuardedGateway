@@ -19,6 +19,22 @@
   <h1>GuardedGateway</h1>
   <p><strong>Cannot overspend. Cannot leak PHI.</strong> An OpenAI-compatible LLM gateway with hard dollar caps enforced before any upstream call, a durable spend ledger, PHI redaction, and BAA-only routing for PHI-flagged traffic.</p>
 
+  <div class="diff" style="margin-top:0;">
+    <strong>Get started</strong>
+    <p><strong>Run it yourself, free:</strong></p>
+    <pre><code>pip install -e ".[dev]"
+cp .env.example .env
+
+python -m guardedgateway.cli create-tenant acme
+python -m guardedgateway.cli create-key acme --cap 25.0
+
+uvicorn guardedgateway.app:app --port 8000</code></pre>
+    <p>Full source on <a href="https://github.com/maximusrufus/GuardedGateway">GitHub</a>, Apache-2.0.</p>
+    <p><strong>Or have us host it:</strong> email
+      <a href="mailto:support@ripplarity.com?subject=GuardedGateway%20hosted%20setup">support@ripplarity.com</a>
+      with your tenant name and which tier you want, and we'll set up a hosted workspace for you.</p>
+  </div>
+
   <div class="tiers">
     <div class="tier">
       <h3>Free</h3>
