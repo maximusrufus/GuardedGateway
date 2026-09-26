@@ -59,6 +59,8 @@ PUBLIC_ROUTES = {
     ),
     ("GET", "/"): "marketing landing page",
     ("POST", "/billing/webhook"): "Stripe webhook, verified by HMAC signature not API key",
+    ("GET", "/billing/success"): "static post-payment page, no tenant data",
+    ("GET", "/billing/cancel"): "static post-cancel page, no tenant data",
     ("POST", "/billing/checkout/{tier}"): (
         "starts a Stripe Checkout session for a caller-supplied tenant name; "
         "returns a checkout URL only, reads no spend/key/tenant data"
@@ -549,6 +551,16 @@ async def dashboard(request: Request, authorization: str | None = Header(default
             "breaker_state": breaker_state,
         },
     )
+
+
+@app.get("/billing/success", response_class=HTMLResponse)
+async def billing_success(request: Request):
+    return templates.TemplateResponse(request, "billing_success.html", {})
+
+
+@app.get("/billing/cancel", response_class=HTMLResponse)
+async def billing_cancel(request: Request):
+    return templates.TemplateResponse(request, "billing_cancel.html", {})
 
 
 @app.post("/billing/checkout/{tier}")
